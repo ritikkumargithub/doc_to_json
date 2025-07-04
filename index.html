@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <!-- Primary Meta Tags -->
+        <title>Convert Word or PDF to JSON | Quiz & Text Extractor</title>
+        <link rel="icon" type="image/x-icon" href="/logo_doc_to_json.svg" />
+        <meta
+            name="description"
+            content="Easily convert DOCX or PDF files into clean JSON format. Supports quiz questions, structured medical content, and more. Fast, accurate, and free."
+        />
+
+        <!-- Open Graph / Facebook -->
+        <meta property="og:title" content="Convert Word or PDF to JSON | Text Extractor" />
+        <meta
+            property="og:description"
+            content="Upload DOCX or PDF files and instantly convert them to JSON format with support for quizzes, explanations, and references."
+        />
+        <meta property="og:type" content="website" />
+
+        <!-- Twitter -->
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content="Convert Word or PDF to JSON | Quiz & Text Extractor" />
+        <meta
+            name="twitter:description"
+            content="Quickly parse Word/PDF files into structured JSON. Ideal for quiz generation and data extraction."
+        />
+
+        <script src="https://unpkg.com/mammoth/mammoth.browser.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet" />
+        <style>
+            body {
+                font-family: 'Inter', sans-serif;
+                background: #f4f6f8;
+                padding: 30px;
+                margin: 0;
+                display: flex;
+                justify-content: center;
+            }
+
+            .container {
+                background: #fff;
+                padding: 30px;
+                border-radius: 12px;
+                max-width: 900px;
+                width: 100%;
+                box-shadow: 0 0 20px rgba(0, 0, 0, 0.08);
+            }
+
+            h2 {
+                font-weight: 600;
+                font-size: 1.8rem;
+                margin-bottom: 20px;
+                color: #333;
+            }
+
+            input[type='file'],
+            textarea {
+                display: block;
+                margin-bottom: 20px;
+                font-size: 16px;
+                padding: 8px;
+                width: 100%;
+            }
+
+            textarea {
+                height: 80px;
+            }
+
+            .btn-group {
+                display: flex;
+                gap: 10px;
+                margin-bottom: 20px;
+            }
+
+            button {
+                padding: 10px 20px;
+                font-size: 15px;
+                border: none;
+                border-radius: 8px;
+                cursor: pointer;
+                font-weight: 500;
+                transition: background 0.3s ease;
+            }
+
+            #downloadBtn {
+                background: linear-gradient(135deg, #3b82f6, #2563eb);
+                color: white;
+            }
+
+            #copyBtn {
+                background: linear-gradient(135deg, #10b981, #059669);
+                color: white;
+            }
+
+            button:disabled {
+                opacity: 0.5;
+                cursor: not-allowed;
+            }
+
+            pre {
+                background: #1e1e1e;
+                color: #d4d4d4;
+                padding: 20px;
+                border-radius: 8px;
+                max-height: 500px;
+                overflow: auto;
+                font-size: 14px;
+            }
+
+            .toast {
+                position: fixed;
+                bottom: 30px;
+                right: 30px;
+                background: #323232;
+                color: white;
+                padding: 14px 20px;
+                border-radius: 6px;
+                font-size: 14px;
+                opacity: 0;
+                pointer-events: none;
+                transition: opacity 0.4s ease, transform 0.4s ease;
+                z-index: 9999;
+            }
+            .toast.show {
+                opacity: 1;
+                pointer-events: auto;
+                transform: translateY(0);
+            }
+            .toast.success {
+                background: #22c55e;
+            }
+            .toast.error {
+                background: #ef4444;
+            }
+            #addObjectUI input,
+            #addObjectUI textarea {
+                width: 100%;
+                margin-bottom: 10px;
+                padding: 8px;
+                font-size: 14px;
+            }
+            #upload {
+              width: 205px;
+              cursor: pointer;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h2>📄 Convert DOCX or PDF to JSON (Custom Keys)</h2>
+
+            <label for="customKeys">Enter Keys (comma-separated):</label>
+            <textarea id="customKeys">Title:,Tags:,Tag:,CASE DISCRIPTION:,EXPLANATION,Source:,REFERENCES:,QUIZ</textarea>
+
+            <input type="file" id="upload" accept=".docx,.pdf" />
+
+            <div class="btn-group">
+                <button id="downloadBtn" disabled>⬇️ Download JSON</button>
+                <button id="copyBtn" disabled>📋 Copy JSON</button>
+            </div>
+
+            <!-- Add Custom Object -->
+            <div style="margin-bottom: 20px">
+                <button id="showAddObject">➕ Add Object</button>
+                <div id="addObjectUI" style="display: none; margin-top: 10px">
+                    <input id="objectKey" placeholder="Enter object key (e.g. extraData)" />
+                    <textarea id="objectValue" placeholder='Enter JSON value (e.g. {"link":"https://..."})' rows="4"></textarea>
+                    <button id="saveObjectBtn">💾 Save Object</button>
+                </div>
+            </div>
+
+            <pre id="output">Upload a file to begin...</pre>
+        </div>
+
+        <div id="toast" class="toast"></div>
+
+        <script>
+            let currentJson = null
+
+            document.getElementById('upload').addEventListener('change', function (event) {
+                const file = event.target.files[0]
+                if (!file) return
+
+                const ext = file.name.split('.').pop().toLowerCase()
+
+                if (ext === 'docx') {
+                    const reader = new FileReader()
+                    reader.onload = function (e) {
+                        mammoth.extractRawText({ arrayBuffer: e.target.result }).then((result) => {
+                            processText(result.value)
+                        })
+                    }
+                    reader.readAsArrayBuffer(file)
+                } else if (ext === 'pdf') {
+                    const reader = new FileReader()
+                    reader.onload = function (e) {
+                        const typedarray = new Uint8Array(e.target.result)
+                        pdfjsLib.getDocument(typedarray).promise.then(async (pdf) => {
+                            let text = ''
+                            for (let i = 1; i <= pdf.numPages; i++) {
+                                const page = await pdf.getPage(i)
+                                const content = await page.getTextContent()
+                                text += content.items.map((item) => item.str).join('\n') + '\n'
+                            }
+                            processText(text)
+                        })
+                    }
+                    reader.readAsArrayBuffer(file)
+                } else {
+                    showToast('error', 'Please upload a .docx or .pdf file.')
+                }
+            })
+
+            document.getElementById('downloadBtn').addEventListener('click', () => {
+                if (!currentJson) return
+                const blob = new Blob([JSON.stringify(currentJson, null, 2)], { type: 'application/json' })
+                const a = document.createElement('a')
+                a.href = URL.createObjectURL(blob)
+                a.download = 'output.json'
+                a.click()
+            })
+
+            document.getElementById('copyBtn').addEventListener('click', () => {
+                if (!currentJson) return
+                const jsonText = JSON.stringify(currentJson, null, 2)
+                navigator.clipboard
+                    .writeText(jsonText)
+                    .then(() => showToast('success', '✅ JSON copied to clipboard!'))
+                    .catch((err) => {
+                        showToast('error', '❌ Failed to copy JSON.')
+                        console.error(err)
+                    })
+            })
+
+            function processText(text) {
+                const rawKeys = document.getElementById('customKeys').value
+                const keys = rawKeys
+                    .split(',')
+                    .map((k) => k.trim())
+                    .filter(Boolean)
+                const parsed = parseTextToJson(text, keys)
+                currentJson = parsed
+                document.getElementById('output').textContent = JSON.stringify(parsed, null, 2)
+                document.getElementById('downloadBtn').disabled = false
+                document.getElementById('copyBtn').disabled = false
+            }
+
+            function parseTextToJson(text, keys) {
+                const result = {}
+                let currentKey = null
+                let quizLines = []
+                let insideQuiz = false
+
+                const lines = text.split(/\r?\n/)
+                for (let line of lines) {
+                    line = line.replace(/\u00A0/g, ' ').trim()
+                    if (!line) continue
+
+                    const matchedKey = keys.find((key) => line === key || line.startsWith(key))
+                    if (matchedKey && matchedKey !== 'QUIZ') {
+                        currentKey = matchedKey.replace(':', '').trim()
+                        const value = line.slice(matchedKey.length).trim()
+                        result[currentKey] = value || ''
+                        insideQuiz = false
+                    } else if (line === 'QUIZ') {
+                        currentKey = 'QUIZ'
+                        insideQuiz = true
+                        quizLines = []
+                    } else if (insideQuiz && currentKey === 'QUIZ') {
+                        quizLines.push(line)
+                    } else if (currentKey) {
+                        result[currentKey] += '\n' + line
+                    }
+                }
+
+                if (quizLines.length > 0) {
+                    result['QUIZ'] = parseQuiz(quizLines)
+                }
+
+                return result
+            }
+
+            function parseQuiz(lines) {
+                const cleanedLines = lines.map((line) =>
+                    line
+                        .replace(/\u00A0/g, ' ')
+                        .replace(/\s+/g, ' ')
+                        .trim()
+                )
+
+                let questionLine = ''
+                let options = []
+                let correctLetter = ''
+                let currentOption = null
+
+                const isOptionStart = (line) => /^[A-Ea-e][).:\s]*$/.test(line) || /^[A-Ea-e][).:\s]+/.test(line)
+
+                for (let i = 0; i < cleanedLines.length; i++) {
+                    const line = cleanedLines[i]
+                    if (!line) continue
+
+                    if (line.toLowerCase().startsWith('the correct answer is')) {
+                        const match = line.match(/the correct answer is[:\s]*([A-Ea-e])/i)
+                        if (match) correctLetter = match[1].toUpperCase()
+                        continue
+                    }
+
+                    if (isOptionStart(line)) {
+                        if (currentOption) options.push(currentOption.text.trim())
+                        const match = line.match(/^([A-Ea-e])[).:\s]*(.*)/)
+                        if (match) {
+                            currentOption = {
+                                label: match[1].toUpperCase(),
+                                text: match[2] ? match[2].trim() : ''
+                            }
+                        }
+                        continue
+                    }
+
+                    if (currentOption) {
+                        currentOption.text += ' ' + line
+                    }
+
+                    if (!currentOption && !questionLine) {
+                        questionLine = line
+                    }
+                }
+
+                if (currentOption) options.push(currentOption.text.trim())
+
+                if (options.length === 0) {
+                    const guessStart = 1
+                    const guessEnd = cleanedLines.findIndex((l) => l.toLowerCase().startsWith('the correct answer is'))
+                    const guessOptions = cleanedLines.slice(guessStart, guessEnd)
+                    if (guessOptions.length === 5) {
+                        options = guessOptions
+                    }
+                }
+
+                return {
+                    question: questionLine,
+                    options,
+                    correctAnswer: correctLetter
+                }
+            }
+            // Add object logic
+            document.getElementById('showAddObject').addEventListener('click', () => {
+                document.getElementById('addObjectUI').style.display = 'block'
+            })
+
+            document.getElementById('saveObjectBtn').addEventListener('click', () => {
+                const key = document.getElementById('objectKey').value.trim()
+                const value = document.getElementById('objectValue').value.trim()
+                if (!key || !value) {
+                    showToast('error', 'Key and value are required.')
+                    return
+                }
+                try {
+                    const parsed = JSON.parse(value)
+                    if (typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error()
+                    if (!currentJson) {
+                        showToast('error', 'Please upload and process a file first.')
+                        return
+                    }
+                    currentJson[key] = parsed
+                    document.getElementById('output').textContent = JSON.stringify(currentJson, null, 2)
+                    document.getElementById('objectKey').value = ''
+                    document.getElementById('objectValue').value = ''
+                    showToast('success', `"${key}" added successfully!`)
+                } catch {
+                    showToast('error', 'Invalid JSON value.')
+                }
+            })
+            function showToast(type, message) {
+                const toast = document.getElementById('toast')
+                toast.className = `toast show ${type}`
+                toast.textContent = message
+
+                setTimeout(() => {
+                    toast.className = 'toast'
+                }, 3000)
+            }
+        </script>
+    </body>
+</html>
